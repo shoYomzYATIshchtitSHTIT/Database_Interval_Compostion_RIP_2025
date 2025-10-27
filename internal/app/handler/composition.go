@@ -68,7 +68,26 @@ func (h *CompositionHandler) GetCompositions(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, compositions)
+	response := make([]gin.H, 0)
+	for _, comp := range compositions {
+		item := gin.H{
+			"id":           comp.ID,
+			"status":       comp.Status,
+			"creator_id":   comp.CreatorID,
+			"moderator_id": comp.ModeratorID,
+			"date_create":  comp.DateCreate.Format("2006-01-02 15:04:05"),
+			"date_update":  comp.DateUpdate.Format("2006-01-02 15:04:05"),
+			"belonging":    comp.Belonging,
+		}
+
+		if comp.DateFinish.Valid {
+			item["date_finish"] = comp.DateFinish.Time.Format("2006-01-02 15:04:05")
+		}
+
+		response = append(response, item)
+	}
+
+	ctx.JSON(http.StatusOK, response)
 }
 
 // GET одна запись заявки
@@ -87,7 +106,35 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, composition)
+	response := gin.H{
+		"id":           composition.ID,
+		"status":       composition.Status,
+		"creator_id":   composition.CreatorID,
+		"moderator_id": composition.ModeratorID,
+		"date_create":  composition.DateCreate.Format("2006-01-02 15:04:05"),
+		"date_update":  composition.DateUpdate.Format("2006-01-02 15:04:05"),
+		"belonging":    composition.Belonging,
+		"intervals":    []gin.H{},
+	}
+
+	if composition.DateFinish.Valid {
+		response["date_finish"] = composition.DateFinish.Time.Format("2006-01-02 15:04:05")
+	}
+
+	if composition.CompositorIntervals != nil {
+		intervals := make([]gin.H, 0)
+		for _, ci := range composition.CompositorIntervals {
+			intervalItem := gin.H{
+				"interval_id": ci.IntervalID,
+				"title":       ci.Interval.Title,
+				"amount":      ci.Amount,
+			}
+			intervals = append(intervals, intervalItem)
+		}
+		response["intervals"] = intervals
+	}
+
+	ctx.JSON(http.StatusOK, response)
 }
 
 // PUT изменения полей заявки
