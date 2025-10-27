@@ -1,6 +1,5 @@
 version: '3.7'
 
-# Settings and configurations that are common for all containers
 x-minio-common: &minio-common
   image: quay.io/minio/minio:RELEASE.2022-10-15T19-57-03Z
   command: server --console-address ":9001" http://minio{1...4}/data{1...2}
@@ -10,18 +9,12 @@ x-minio-common: &minio-common
   expose:
     - "9000"
     - "9001"
-    # environment:
-    # MINIO_ROOT_USER: minioadmin
-    # MINIO_ROOT_PASSWORD: minioadmin
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
     interval: 30s
     timeout: 20s
     retries: 3
 
-# starts 4 docker containers running minio server instances.
-# using nginx reverse proxy, load balancing, you can access
-# it through port 9000.
 services:
   minio1:
     <<: *minio-common
@@ -76,6 +69,19 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass ""  # Без пароля для разработки
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   adminer:
     image: adminer:latest
     ports:
@@ -83,8 +89,6 @@ services:
     depends_on:
       - postgres
 
-## By default this config uses default local driver,
-## For custom volumes replace with volume driver configuration.
 volumes:
   data1-1:
   data1-2:
@@ -95,3 +99,4 @@ volumes:
   data4-1:
   data4-2:
   postgres_data:
+  redis_data:

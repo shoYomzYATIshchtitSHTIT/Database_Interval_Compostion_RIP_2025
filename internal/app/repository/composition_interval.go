@@ -47,7 +47,7 @@ func (r *CompositionIntervalRepository) GetCompositionCart(creatorID uint) (uint
 }
 
 // GetCompositions возвращает список заявок с фильтрацией (кроме удаленных и черновика)
-func (r *CompositionIntervalRepository) GetCompositions(status string, dateFrom, dateTo time.Time) ([]ds.Composition, error) {
+func (r *CompositionIntervalRepository) GetCompositions(status string, dateFrom, dateTo time.Time, userID uint, isModerator bool) ([]ds.Composition, error) {
 	var compositions []ds.Composition
 
 	query := r.db.
@@ -58,6 +58,10 @@ func (r *CompositionIntervalRepository) GetCompositions(status string, dateFrom,
 			return db.Select("user_id, login")
 		}).
 		Where("status != ? AND status != ?", "Удалён", "Черновик")
+
+	if !isModerator {
+		query = query.Where("creator_id = ?", userID)
+	}
 
 	if status != "" {
 		query = query.Where("status = ?", status)

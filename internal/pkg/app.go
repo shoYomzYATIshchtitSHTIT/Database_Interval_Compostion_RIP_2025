@@ -9,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 type Application struct {
@@ -28,6 +30,9 @@ func NewApp(c *config.Config, r *gin.Engine, repo *repository.Repository) *Appli
 func (a *Application) RunApp() {
 	logrus.Info("Server start up")
 
+	// Swagger документация
+	a.Router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	// Регистрируем обработчики
 	handler.RegisterHandlers(a.Router, a.Repo)
 
@@ -37,6 +42,8 @@ func (a *Application) RunApp() {
 	a.Router.Static("/img", "./resources/img")
 
 	serverAddress := fmt.Sprintf("%s:%d", a.Config.ServiceHost, a.Config.ServicePort)
+	logrus.Infof("Starting server on %s", serverAddress)
+
 	if err := a.Router.Run(serverAddress); err != nil {
 		logrus.Fatal(err)
 	}

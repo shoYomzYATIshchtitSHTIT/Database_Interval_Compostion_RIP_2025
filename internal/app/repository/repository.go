@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"Backend-RIP/internal/app/config"
 	"Backend-RIP/internal/app/dsn"
+	"Backend-RIP/internal/app/redis"
 	"context"
 	"fmt"
 
@@ -14,76 +16,100 @@ import (
 
 type Repository struct {
 	db                   *gorm.DB
+	redisClient          *redis.Client
 	Interval             *IntervalRepository
 	Composition_interval *CompositionIntervalRepository
 	User                 *UserRepository
 }
 
 func NewRepository() (*Repository, error) {
+	// Загружаем конфигурацию
+	cfg, err := config.NewConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	// Инициализируем базу данных
 	db, err := gorm.Open(postgres.Open(dsn.FromEnv()), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
 
+	// Инициализируем Redis клиент
+	redisClient, err := redis.NewClient(cfg)
+	if err != nil {
+		logrus.Warnf("Failed to initialize Redis client: %v", err)
+		// Продолжаем без Redis, но логируем предупреждение
+	}
+
+	// Инициализируем MinIO клиент
 	minioClient, err := InitMinIOClient()
 	if err != nil {
 		return nil, err
 	}
 
-	return &Repository{
+	// Создаем репозиторий
+	repo := &Repository{
 		db:                   db,
+		redisClient:          redisClient,
 		Interval:             NewIntervalRepository(db, minioClient),
 		Composition_interval: NewCompositionIntervalRepository(db),
 		User:                 NewUserRepository(db),
-	}, nil
+	}
+
+	return repo, nil
 }
 
-func CloseDBConn(r *Repository) {
-	dbInstance, _ := r.db.DB()
-	_ = dbInstance.Close()
+// GetRedisClient возвращает Redis клиент
+func (r *Repository) GetRedisClient() *redis.Client {
+	return r.redisClient
 }
 
+// Close закрывает все соединения
+func (r *Repository) Close() {
+	if r.redisClient != nil {
+		if err := r.redisClient.Close(); err != nil {
+			logrus.Errorf("Error closing Redis client: %v", err)
+		}
+	}
+}
+
+// InitMinIOClient (существующий код без изменений)
 func InitMinIOClient() (*minio.Client, error) {
-	endpoint := "localhost:9000" // nginx proxy
-
-	// Используем credentials из docker-compose
+	endpoint := "localhost:9000"
 	accessKeyID := "minio"
 	secretAccessKey := "minio124"
 	useSSL := false
-
-	logrus.Printf("MinIO Config - Endpoint: %s, User: %s", endpoint, accessKeyID)
 
 	minioClient, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
 		Secure: useSSL,
 	})
 	if err != nil {
-		logrus.Errorf("Failed to create MinIO client: %v", err)
 		return nil, fmt.Errorf("failed to create MinIO client: %v", err)
 	}
 
 	ctx := context.Background()
 
-	// Проверим подключение
+	// Проверяем подключение
 	_, err = minioClient.ListBuckets(ctx)
 	if err != nil {
-		logrus.Errorf("MinIO connection test failed: %v", err)
 		return nil, fmt.Errorf("minio connection test failed: %v", err)
 	}
 
-	exists, err := minioClient.BucketExists(ctx, intervalImagesBucket)
+	// Создаем bucket если не существует
+	exists, err := minioClient.BucketExists(ctx, "interval-image")
 	if err != nil {
 		return nil, fmt.Errorf("failed to check bucket existence: %v", err)
 	}
 
 	if !exists {
-		err = minioClient.MakeBucket(ctx, intervalImagesBucket, minio.MakeBucketOptions{})
+		err = minioClient.MakeBucket(ctx, "interval-image", minio.MakeBucketOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create bucket: %v", err)
 		}
-		logrus.Printf("Bucket '%s' created successfully\n", intervalImagesBucket)
 	}
 
-	logrus.Printf("MinIO client initialized successfully")
+	logrus.Info("MinIO client initialized successfully")
 	return minioClient, nil
 }

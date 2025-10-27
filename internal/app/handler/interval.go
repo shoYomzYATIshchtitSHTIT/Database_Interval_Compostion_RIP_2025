@@ -2,6 +2,7 @@ package handler
 
 import (
 	"Backend-RIP/internal/app/ds"
+	"Backend-RIP/internal/app/middleware"
 	"Backend-RIP/internal/app/repository"
 	"net/http"
 	"strconv"
@@ -37,7 +38,18 @@ type AddIntervalToCompositionRequest struct {
 	Amount     uint `json:"amount" binding:"required,min=1"`
 }
 
-// GET список интервалов с фильтрацией
+// GetIntervals godoc
+// @Summary Get intervals list
+// @Description Get list of intervals with filtering
+// @Tags Intervals
+// @Produce json
+// @Param title query string false "Filter by title"
+// @Param tone_min query number false "Filter by minimum tone"
+// @Param tone_max query number false "Filter by maximum tone"
+// @Success 200 {array} ds.Interval
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /intervals [get]
 func (h *IntervalHandler) GetIntervals(ctx *gin.Context) {
 	title := ctx.Query("title")
 	toneMinStr := ctx.Query("tone_min")
@@ -72,7 +84,16 @@ func (h *IntervalHandler) GetIntervals(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, intervals)
 }
 
-// GET один интервал
+// GetInterval godoc
+// @Summary Get interval details
+// @Description Get interval details by ID
+// @Tags Intervals
+// @Produce json
+// @Param id path int true "Interval ID"
+// @Success 200 {object} ds.Interval
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /intervals/{id} [get]
 func (h *IntervalHandler) GetInterval(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.Atoi(idStr)
@@ -91,7 +112,20 @@ func (h *IntervalHandler) GetInterval(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, interval)
 }
 
-// POST добавление интервала
+// CreateInterval godoc
+// @Summary Create interval
+// @Description Create new interval (moderator only)
+// @Tags Intervals
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body CreateIntervalRequest true "Interval data"
+// @Success 201 {object} ds.Interval
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /intervals [post]
 func (h *IntervalHandler) CreateInterval(ctx *gin.Context) {
 	var req CreateIntervalRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -115,7 +149,21 @@ func (h *IntervalHandler) CreateInterval(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, interval)
 }
 
-// PUT изменение интервала
+// UpdateInterval godoc
+// @Summary Update interval
+// @Description Update interval (moderator only)
+// @Tags Intervals
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param id path int true "Interval ID"
+// @Param request body UpdateIntervalRequest true "Update data"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /intervals/{id} [put]
 func (h *IntervalHandler) UpdateInterval(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -151,7 +199,18 @@ func (h *IntervalHandler) UpdateInterval(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Interval updated successfully"})
 }
 
-// DELETE удаление интервала
+// DeleteInterval godoc
+// @Summary Delete interval
+// @Description Delete interval (moderator only)
+// @Tags Intervals
+// @Security BearerAuth
+// @Param id path int true "Interval ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /intervals/{id} [delete]
 func (h *IntervalHandler) DeleteInterval(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -170,7 +229,19 @@ func (h *IntervalHandler) DeleteInterval(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Interval deleted successfully"})
 }
 
-// POST добавление интервала в заявку-черновик
+// AddIntervalToComposition godoc
+// @Summary Add interval to composition
+// @Description Add interval to draft composition
+// @Tags Intervals
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body AddIntervalToCompositionRequest true "Add interval data"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /intervals/add-to-composition [post]
 func (h *IntervalHandler) AddIntervalToComposition(ctx *gin.Context) {
 	var req AddIntervalToCompositionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -178,8 +249,12 @@ func (h *IntervalHandler) AddIntervalToComposition(ctx *gin.Context) {
 		return
 	}
 
-	// Фиксированный пользователь-создатель (как указано в задании)
-	creatorID := uint(1)
+	// Получаем ID аутентифицированного пользователя
+	creatorID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
 
 	err := h.repo.Interval.AddIntervalToComposition(req.IntervalID, creatorID, req.Amount)
 	if err != nil {
@@ -191,7 +266,21 @@ func (h *IntervalHandler) AddIntervalToComposition(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Interval added to composition successfully"})
 }
 
-// POST добавление изображения интервала
+// UpdateIntervalPhoto godoc
+// @Summary Update interval photo
+// @Description Update interval photo (moderator only)
+// @Tags Intervals
+// @Security BearerAuth
+// @Accept multipart/form-data
+// @Produce json
+// @Param id path int true "Interval ID"
+// @Param image formData file true "Interval image"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /intervals/{id}/image [post]
 func (h *IntervalHandler) UpdateIntervalPhoto(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)

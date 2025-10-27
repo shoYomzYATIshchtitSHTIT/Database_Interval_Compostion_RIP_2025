@@ -29,7 +29,19 @@ type UpdateCompositionIntervalRequest struct {
 	Amount        uint `json:"amount" binding:"required,min=1"`
 }
 
-// DELETE удаление интервала из заявки (без PK м-м)
+// RemoveFromComposition godoc
+// @Summary Remove interval from composition
+// @Description Remove interval from composition (authenticated users only)
+// @Tags CompositionIntervals
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body RemoveFromCompositionRequest true "Composition and interval IDs"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /composition-intervals [delete]
 func (h *CompositionIntervalHandler) RemoveFromComposition(ctx *gin.Context) {
 	var req RemoveFromCompositionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -47,7 +59,19 @@ func (h *CompositionIntervalHandler) RemoveFromComposition(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Interval removed from composition successfully"})
 }
 
-// PUT изменение количества интервалов в заявке (без PK м-м)
+// UpdateCompositionInterval godoc
+// @Summary Update interval amount in composition
+// @Description Update interval amount in composition (authenticated users only)
+// @Tags CompositionIntervals
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body UpdateCompositionIntervalRequest true "Update data"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /composition-intervals [put]
 func (h *CompositionIntervalHandler) UpdateCompositionInterval(ctx *gin.Context) {
 	var req UpdateCompositionIntervalRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {

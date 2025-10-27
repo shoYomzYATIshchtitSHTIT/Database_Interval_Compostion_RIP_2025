@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"Backend-RIP/internal/app/middleware"
 	"Backend-RIP/internal/app/repository"
 	"net/http"
 	"strconv"
@@ -29,9 +30,23 @@ type UpdateCompositionRequest struct {
 	Belonging *string `json:"belonging"`
 }
 
-// GET иконки корзины
+// GetCompositionCart godoc
+// @Summary Get composition cart
+// @Description Get user's draft composition with item count
+// @Tags Compositions
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} CartInfoResponse
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /compositions/comp-cart [get]
 func (h *CompositionHandler) GetCompositionCart(ctx *gin.Context) {
-	creatorID := uint(1) // Фиксированный пользователь-создатель
+	creatorID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
 	compositionID, itemCount, err := h.repo.Composition_interval.GetCompositionCart(creatorID)
 	if err != nil {
 		logrus.Error(err)
@@ -45,7 +60,19 @@ func (h *CompositionHandler) GetCompositionCart(ctx *gin.Context) {
 	})
 }
 
-// GET список заявок с фильтрацией
+// GetCompositions godoc
+// @Summary Get compositions list
+// @Description Get list of compositions with filtering (authenticated users only)
+// @Tags Compositions
+// @Security BearerAuth
+// @Produce json
+// @Param status query string false "Filter by status"
+// @Param date_from query string false "Filter by date from (YYYY-MM-DD)"
+// @Param date_to query string false "Filter by date to (YYYY-MM-DD)"
+// @Success 200 {array} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /compositions [get]
 func (h *CompositionHandler) GetCompositions(ctx *gin.Context) {
 	status := ctx.Query("status")
 
@@ -61,16 +88,25 @@ func (h *CompositionHandler) GetCompositions(ctx *gin.Context) {
 		}
 	}
 
-	compositions, err := h.repo.Composition_interval.GetCompositions(status, dateFrom, dateTo)
+	// Получаем информацию о пользователе из контекста
+	userID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	isModerator := middleware.IsModerator(ctx)
+
+	compositions, err := h.repo.Composition_interval.GetCompositions(status, dateFrom, dateTo, userID, isModerator)
 	if err != nil {
 		logrus.Error(err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get compositions"})
 		return
 	}
 
-	response := make([]gin.H, 0)
+	response := make([]map[string]interface{}, 0)
 	for _, comp := range compositions {
-		item := gin.H{
+		item := map[string]interface{}{
 			"id":           comp.ID,
 			"status":       comp.Status,
 			"creator_id":   comp.CreatorID,
@@ -90,7 +126,16 @@ func (h *CompositionHandler) GetCompositions(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, response)
 }
 
-// GET одна запись заявки
+// GetComposition godoc
+// @Summary Get composition details
+// @Description Get composition details with intervals
+// @Tags Compositions
+// @Produce json
+// @Param id path int true "Composition ID"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /compositions/{id} [get]
 func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -106,7 +151,7 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 		return
 	}
 
-	response := gin.H{
+	response := map[string]interface{}{
 		"id":           composition.ID,
 		"status":       composition.Status,
 		"creator_id":   composition.CreatorID,
@@ -114,7 +159,7 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 		"date_create":  composition.DateCreate.Format("2006-01-02 15:04:05"),
 		"date_update":  composition.DateUpdate.Format("2006-01-02 15:04:05"),
 		"belonging":    composition.Belonging,
-		"intervals":    []gin.H{},
+		"intervals":    []map[string]interface{}{},
 	}
 
 	if composition.DateFinish.Valid {
@@ -122,9 +167,9 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 	}
 
 	if composition.CompositorIntervals != nil {
-		intervals := make([]gin.H, 0)
+		intervals := make([]map[string]interface{}, 0)
 		for _, ci := range composition.CompositorIntervals {
-			intervalItem := gin.H{
+			intervalItem := map[string]interface{}{
 				"interval_id": ci.IntervalID,
 				"title":       ci.Interval.Title,
 				"amount":      ci.Amount,
@@ -137,7 +182,19 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, response)
 }
 
-// PUT изменения полей заявки
+// UpdateCompositionFields godoc
+// @Summary Update composition fields
+// @Description Update composition fields
+// @Tags Compositions
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param id path int true "Composition ID"
+// @Param request body UpdateCompositionRequest true "Update data"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /compositions/{id} [put]
 func (h *CompositionHandler) UpdateCompositionFields(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -167,7 +224,16 @@ func (h *CompositionHandler) UpdateCompositionFields(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Composition updated successfully"})
 }
 
-// PUT сформировать создателем
+// FormComposition godoc
+// @Summary Form composition
+// @Description Form composition from draft status (creator only)
+// @Tags Compositions
+// @Security BearerAuth
+// @Param id path int true "Composition ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Router /compositions/{id}/form [put]
 func (h *CompositionHandler) FormComposition(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -176,7 +242,12 @@ func (h *CompositionHandler) FormComposition(ctx *gin.Context) {
 		return
 	}
 
-	creatorID := uint(1) // Фиксированный пользователь-создатель
+	creatorID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
 	err = h.repo.Composition_interval.FormComposition(uint(id), creatorID)
 	if err != nil {
 		logrus.Error(err)
@@ -187,7 +258,17 @@ func (h *CompositionHandler) FormComposition(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Composition formed successfully"})
 }
 
-// PUT завершить модератором
+// CompleteComposition godoc
+// @Summary Complete composition
+// @Description Complete composition (moderator only)
+// @Tags Compositions
+// @Security BearerAuth
+// @Param id path int true "Composition ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Router /compositions/{id}/complete [put]
 func (h *CompositionHandler) CompleteComposition(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -196,9 +277,13 @@ func (h *CompositionHandler) CompleteComposition(ctx *gin.Context) {
 		return
 	}
 
-	moderatorID := uint(2)                          // Фиксированный модератор
-	calculationData := make(map[string]interface{}) // Дополнительные расчетные данные если нужны
+	moderatorID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
 
+	calculationData := make(map[string]interface{})
 	err = h.repo.Composition_interval.CompleteComposition(uint(id), moderatorID, "Завершена", calculationData)
 	if err != nil {
 		logrus.Error(err)
@@ -209,7 +294,17 @@ func (h *CompositionHandler) CompleteComposition(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Composition completed successfully"})
 }
 
-// PUT отклонить модератором
+// RejectComposition godoc
+// @Summary Reject composition
+// @Description Reject composition (moderator only)
+// @Tags Compositions
+// @Security BearerAuth
+// @Param id path int true "Composition ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Router /compositions/{id}/reject [put]
 func (h *CompositionHandler) RejectComposition(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -218,9 +313,13 @@ func (h *CompositionHandler) RejectComposition(ctx *gin.Context) {
 		return
 	}
 
-	moderatorID := uint(2) // Фиксированный модератор
-	calculationData := make(map[string]interface{})
+	moderatorID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
 
+	calculationData := make(map[string]interface{})
 	err = h.repo.Composition_interval.CompleteComposition(uint(id), moderatorID, "Отклонена", calculationData)
 	if err != nil {
 		logrus.Error(err)
@@ -231,12 +330,28 @@ func (h *CompositionHandler) RejectComposition(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Composition rejected successfully"})
 }
 
-// DELETE удаление заявки
+// DeleteComposition godoc
+// @Summary Delete composition
+// @Description Delete composition (creator only)
+// @Tags Compositions
+// @Security BearerAuth
+// @Param id path int true "Composition ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /compositions/{id} [delete]
 func (h *CompositionHandler) DeleteComposition(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid composition ID"})
+		return
+	}
+
+	_, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		return
 	}
 
@@ -248,64 +363,4 @@ func (h *CompositionHandler) DeleteComposition(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Composition deleted successfully"})
-}
-
-// DELETE удаление интервала из заявки
-func (h *CompositionHandler) DeleteCompositionInterval(ctx *gin.Context) {
-	compositionIDStr := ctx.Param("composition_id")
-	compositionID, err := strconv.ParseUint(compositionIDStr, 10, 32)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid composition ID"})
-		return
-	}
-
-	intervalIDStr := ctx.Param("interval_id")
-	intervalID, err := strconv.ParseUint(intervalIDStr, 10, 32)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid interval ID"})
-		return
-	}
-
-	err = h.repo.Composition_interval.DeleteCompositionInterval(uint(compositionID), uint(intervalID))
-	if err != nil {
-		logrus.Error(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete interval from composition"})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"message": "Interval removed from composition successfully"})
-}
-
-// PUT изменение количества интервалов в заявке
-func (h *CompositionHandler) UpdateCompositionInterval(ctx *gin.Context) {
-	compositionIDStr := ctx.Param("composition_id")
-	compositionID, err := strconv.ParseUint(compositionIDStr, 10, 32)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid composition ID"})
-		return
-	}
-
-	intervalIDStr := ctx.Param("interval_id")
-	intervalID, err := strconv.ParseUint(intervalIDStr, 10, 32)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid interval ID"})
-		return
-	}
-
-	var request struct {
-		Amount uint `json:"amount" binding:"required,min=1"`
-	}
-	if err := ctx.ShouldBindJSON(&request); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
-		return
-	}
-
-	err = h.repo.Composition_interval.UpdateCompositionInterval(uint(compositionID), uint(intervalID), request.Amount)
-	if err != nil {
-		logrus.Error(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update interval amount"})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"message": "Interval amount updated successfully"})
 }
