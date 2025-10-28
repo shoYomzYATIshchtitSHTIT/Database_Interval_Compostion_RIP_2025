@@ -130,13 +130,23 @@ func (h *CompositionHandler) GetCompositions(ctx *gin.Context) {
 // @Summary Get composition details
 // @Description Get composition details with intervals
 // @Tags Compositions
+// @Security BearerAuth
 // @Produce json
 // @Param id path int true "Composition ID"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
 // @Failure 404 {object} map[string]string
 // @Router /compositions/{id} [get]
 func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
+	// Получаем информацию о пользователе из контекста
+	userID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -148,6 +158,15 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 	if err != nil {
 		logrus.Error(err)
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Composition not found"})
+		return
+	}
+
+	// Проверяем права доступа
+	isModerator := middleware.IsModerator(ctx)
+
+	// Гость (не модератор) может смотреть только свои заявки
+	if !isModerator && composition.CreatorID != userID {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
 

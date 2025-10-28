@@ -19,7 +19,7 @@ const (
 // AuthMiddleware проверяет JWT токен и добавляет пользователя в контекст
 func AuthMiddleware(repo *repository.Repository) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Получаем заголовок Authorization
+
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
