@@ -28,6 +28,7 @@ type CartInfoResponse struct {
 
 type UpdateCompositionRequest struct {
 	Belonging *string `json:"belonging"`
+	Title     *string `json:"title"`
 }
 
 // GetCompositionCart godoc
@@ -114,6 +115,7 @@ func (h *CompositionHandler) GetCompositions(ctx *gin.Context) {
 			"date_create":  comp.DateCreate.Format("2006-01-02 15:04:05"),
 			"date_update":  comp.DateUpdate.Format("2006-01-02 15:04:05"),
 			"belonging":    comp.Belonging,
+			"title":        comp.Title,
 		}
 
 		if comp.DateFinish.Valid {
@@ -178,6 +180,7 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 		"date_create":  composition.DateCreate.Format("2006-01-02 15:04:05"),
 		"date_update":  composition.DateUpdate.Format("2006-01-02 15:04:05"),
 		"belonging":    composition.Belonging,
+		"title":        composition.Title,
 		"intervals":    []map[string]interface{}{},
 	}
 
@@ -214,6 +217,7 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Router /compositions/{id} [put]
+// PUT изменения полей заявки
 func (h *CompositionHandler) UpdateCompositionFields(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -231,6 +235,9 @@ func (h *CompositionHandler) UpdateCompositionFields(ctx *gin.Context) {
 	updates := make(map[string]interface{})
 	if req.Belonging != nil {
 		updates["belonging"] = *req.Belonging
+	}
+	if req.Title != nil {
+		updates["title"] = *req.Title // ← Добавить обновление названия
 	}
 
 	err = h.repo.Composition_interval.UpdateCompositionFields(uint(id), updates)

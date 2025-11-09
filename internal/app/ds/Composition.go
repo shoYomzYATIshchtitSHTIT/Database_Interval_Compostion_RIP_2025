@@ -13,7 +13,8 @@ type Composition struct {
 	DateCreate  time.Time `gorm:"not null"`
 	DateUpdate  time.Time
 	DateFinish  sql.NullTime
-	Belonging   string `gorm:"type:varchar(30)"`
+	Belonging   string  `gorm:"type:varchar(30)"`
+	Title       *string `gorm:"type:varchar(255)"`
 
 	Creator             Users                `gorm:"foreignKey:CreatorID"`
 	Moderator           Users                `gorm:"foreignKey:ModeratorID"`
