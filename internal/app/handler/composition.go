@@ -27,6 +27,7 @@ type CartInfoResponse struct {
 
 type UpdateCompositionRequest struct {
 	Belonging *string `json:"belonging"`
+	Title     *string `json:"title"`
 }
 
 // GET иконки корзины
@@ -78,6 +79,7 @@ func (h *CompositionHandler) GetCompositions(ctx *gin.Context) {
 			"date_create":  comp.DateCreate.Format("2006-01-02 15:04:05"),
 			"date_update":  comp.DateUpdate.Format("2006-01-02 15:04:05"),
 			"belonging":    comp.Belonging,
+			"title":        comp.Title,
 		}
 
 		if comp.DateFinish.Valid {
@@ -114,6 +116,7 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 		"date_create":  composition.DateCreate.Format("2006-01-02 15:04:05"),
 		"date_update":  composition.DateUpdate.Format("2006-01-02 15:04:05"),
 		"belonging":    composition.Belonging,
+		"title":        composition.Title,
 		"intervals":    []gin.H{},
 	}
 
@@ -155,6 +158,9 @@ func (h *CompositionHandler) UpdateCompositionFields(ctx *gin.Context) {
 	updates := make(map[string]interface{})
 	if req.Belonging != nil {
 		updates["belonging"] = *req.Belonging
+	}
+	if req.Title != nil {
+		updates["title"] = *req.Title
 	}
 
 	err = h.repo.Composition_interval.UpdateCompositionFields(uint(id), updates)
