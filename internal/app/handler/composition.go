@@ -195,6 +195,9 @@ func (h *CompositionHandler) GetComposition(ctx *gin.Context) {
 				"interval_id": ci.IntervalID,
 				"title":       ci.Interval.Title,
 				"amount":      ci.Amount,
+				"description": ci.Interval.Description,
+				"tone":        ci.Interval.Tone,
+				"photo":       ci.Interval.Photo,
 			}
 			intervals = append(intervals, intervalItem)
 		}
