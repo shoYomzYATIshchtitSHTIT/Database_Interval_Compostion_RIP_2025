@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"Backend-RIP/internal/app/middleware"
 	"Backend-RIP/internal/app/repository"
 	"net/http"
 
@@ -43,13 +44,39 @@ type UpdateCompositionIntervalRequest struct {
 // @Failure 500 {object} map[string]string
 // @Router /composition-intervals [delete]
 func (h *CompositionIntervalHandler) RemoveFromComposition(ctx *gin.Context) {
+	userID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
 	var req RemoveFromCompositionRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
 		return
 	}
 
-	err := h.repo.Composition_interval.DeleteCompositionInterval(req.CompositionID, req.IntervalID)
+	// Загружаем композицию
+	composition, err := h.repo.Composition_interval.GetComposition(req.CompositionID)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Composition not found"})
+		return
+	}
+
+	// 1. Проверка прав — только автор может менять
+	if composition.CreatorID != userID {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// 2. Запрет редактирования не-черновиков
+	if composition.Status != "Черновик" {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Only draft compositions can be edited"})
+		return
+	}
+
+	// Удаляем интервал
+	err = h.repo.Composition_interval.DeleteCompositionInterval(req.CompositionID, req.IntervalID)
 	if err != nil {
 		logrus.Error(err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove interval from composition"})
@@ -73,13 +100,38 @@ func (h *CompositionIntervalHandler) RemoveFromComposition(ctx *gin.Context) {
 // @Failure 500 {object} map[string]string
 // @Router /composition-intervals [put]
 func (h *CompositionIntervalHandler) UpdateCompositionInterval(ctx *gin.Context) {
+	userID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
 	var req UpdateCompositionIntervalRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
 		return
 	}
 
-	err := h.repo.Composition_interval.UpdateCompositionInterval(req.CompositionID, req.IntervalID, req.Amount)
+	// Загружаем композицию
+	composition, err := h.repo.Composition_interval.GetComposition(req.CompositionID)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Composition not found"})
+		return
+	}
+
+	// 1. Только автор может менять
+	if composition.CreatorID != userID {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	// 2. Запрет редактирования не-черновиков
+	if composition.Status != "Черновик" {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Only draft compositions can be edited"})
+		return
+	}
+
+	err = h.repo.Composition_interval.UpdateCompositionInterval(req.CompositionID, req.IntervalID, req.Amount)
 	if err != nil {
 		logrus.Error(err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update interval amount"})

@@ -229,28 +229,51 @@ func (h *CompositionHandler) UpdateCompositionFields(ctx *gin.Context) {
 		return
 	}
 
-	var req UpdateCompositionRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
+	userID, exists := middleware.GetUserID(ctx)
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		return
 	}
 
-	updates := make(map[string]interface{})
+	// Загружаем заявку
+	composition, err := h.repo.Composition_interval.GetComposition(uint(id))
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Composition not found"})
+		return
+	}
+
+	// Разрешаем редактирование только если статус = Черновик
+	if composition.Status != "Черновик" {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Only draft compositions can be edited"})
+		return
+	}
+
+	// Только создатель может редактировать
+	if composition.CreatorID != userID {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var req UpdateCompositionRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	updates := map[string]interface{}{}
 	if req.Belonging != nil {
 		updates["belonging"] = *req.Belonging
 	}
 	if req.Title != nil {
-		updates["title"] = *req.Title // ← Добавить обновление названия
+		updates["title"] = *req.Title
 	}
 
-	err = h.repo.Composition_interval.UpdateCompositionFields(uint(id), updates)
-	if err != nil {
-		logrus.Error(err)
+	if err := h.repo.Composition_interval.UpdateCompositionFields(uint(id), updates); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update composition"})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Composition updated successfully"})
+	ctx.JSON(http.StatusOK, gin.H{"message": "Composition updated"})
 }
 
 // FormComposition godoc
