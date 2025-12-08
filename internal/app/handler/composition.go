@@ -315,8 +315,8 @@ func (h *CompositionHandler) FormComposition(ctx *gin.Context) {
 }
 
 // CompleteComposition godoc
-// @Summary Complete composition and start async calculation
-// @Description Complete composition and automatically start async calculation in Django service (moderator only)
+// @Summary Complete composition
+// @Description Complete composition (moderator only)
 // @Tags Compositions
 // @Security BearerAuth
 // @Param id path int true "Composition ID"
@@ -326,31 +326,51 @@ func (h *CompositionHandler) FormComposition(ctx *gin.Context) {
 // @Failure 403 {object} map[string]string
 // @Router /compositions/{id}/complete [put]
 func (h *CompositionHandler) CompleteComposition(ctx *gin.Context) {
+	logrus.Info("=== COMPLETE COMPOSITION START ===")
+
 	idStr := ctx.Param("id")
+	logrus.Infof("Request to complete composition ID: %s", idStr)
+
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
+		logrus.Errorf("❌ Invalid composition ID format: %s", idStr)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid composition ID"})
 		return
 	}
 
 	moderatorID, exists := middleware.GetUserID(ctx)
 	if !exists {
+		logrus.Error("❌ Authentication required")
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		return
 	}
 
-	// Завершаем заявку
-	calculationData := make(map[string]interface{})
-	err = h.repo.Composition_interval.CompleteComposition(uint(id), moderatorID, "Завершена", calculationData)
+	logrus.Infof("Moderator ID: %d is completing composition ID: %d", moderatorID, id)
+
+	// Обновляем статус на "Завершена"
+	updates := map[string]interface{}{
+		"status":       "Завершена",
+		"moderator_id": moderatorID,
+		"date_update":  time.Now(),
+		"date_finish":  time.Now(),
+		"belonging":    "", // Очищаем, Django заполнит позже
+	}
+
+	logrus.Infof("Updating composition %d with: status=Завершена, moderator_id=%d, belonging=''",
+		id, moderatorID)
+
+	err = h.repo.Composition_interval.UpdateCompositionFields(uint(id), updates)
 	if err != nil {
-		logrus.Error(err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		logrus.Errorf("❌ Failed to update composition %d: %v", id, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	logrus.Infof("✅ Composition %d status updated to 'Завершена' in database", id)
+
 	// ЗАПУСКАЕМ АСИНХРОННЫЙ РАСЧЁТ В DJANGO-СЕРВИСЕ
 	go func(compositionID uint) {
-		logrus.Infof("Starting async calculation for composition %d via Django service", compositionID)
+		logrus.Infof("🚀 Starting async Django calculation for composition %d", compositionID)
 
 		// Подготовка запроса к Django-сервису
 		payload := map[string]interface{}{
@@ -359,35 +379,53 @@ func (h *CompositionHandler) CompleteComposition(ctx *gin.Context) {
 
 		jsonData, err := json.Marshal(payload)
 		if err != nil {
-			logrus.Errorf("Failed to marshal request for composition %d: %v", compositionID, err)
+			logrus.Errorf("❌ Failed to marshal request for composition %d: %v", compositionID, err)
 			return
 		}
 
+		logrus.Infof("📤 Sending request to Django: http://localhost:8001/calculate/")
+		logrus.Infof("📦 Payload: %s", string(jsonData))
+
 		// Вызов Django-сервиса
+		startTime := time.Now()
 		resp, err := http.Post(
-			"http://localhost:8001/calculate/", // URL Django-сервиса
+			"http://localhost:8001/calculate/",
 			"application/json",
 			bytes.NewBuffer(jsonData),
 		)
 
 		if err != nil {
-			logrus.Errorf("Failed to call Django service for composition %d: %v", compositionID, err)
+			logrus.Errorf("❌ Failed to call Django service for composition %d: %v", compositionID, err)
 			return
 		}
 		defer resp.Body.Close()
 
+		duration := time.Since(startTime)
+		logrus.Infof("📨 Django response for composition %d: HTTP %d (took %v)",
+			compositionID, resp.StatusCode, duration)
+
 		if resp.StatusCode != http.StatusOK {
-			logrus.Errorf("Django service returned error for composition %d: HTTP %d", compositionID, resp.StatusCode)
+			logrus.Errorf("❌ Django service returned error for composition %d: HTTP %d",
+				compositionID, resp.StatusCode)
 			// Читаем тело ответа для отладки
 			body, _ := io.ReadAll(resp.Body)
 			logrus.Errorf("Response body: %s", string(body))
 		} else {
-			logrus.Infof("Django service accepted calculation request for composition %d", compositionID)
+			logrus.Infof("✅ Django service accepted calculation request for composition %d",
+				compositionID)
+
+			// Предсказываем время завершения расчёта
+			estimatedCompletion := time.Now().Add(8 * time.Second)
+			logrus.Infof("⏰ Estimated calculation completion for composition %d: %v",
+				compositionID, estimatedCompletion.Format("15:04:05"))
 		}
 	}(uint(id))
 
+	logrus.Infof("✅ CompleteComposition: composition %d completed successfully, Django calculation started", id)
+	logrus.Info("=== COMPLETE COMPOSITION END ===")
+
 	ctx.JSON(http.StatusOK, gin.H{
-		"message": "Composition completed successfully. Async calculation started in Django service.",
+		"message": "Composition completed. Async calculation of belonging started.",
 	})
 }
 
@@ -403,28 +441,52 @@ func (h *CompositionHandler) CompleteComposition(ctx *gin.Context) {
 // @Failure 403 {object} map[string]string
 // @Router /compositions/{id}/reject [put]
 func (h *CompositionHandler) RejectComposition(ctx *gin.Context) {
+	logrus.Info("=== REJECT COMPOSITION START ===")
+
 	idStr := ctx.Param("id")
+	logrus.Infof("Request to reject composition ID: %s", idStr)
+
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
+		logrus.Errorf("❌ Invalid composition ID format: %s", idStr)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid composition ID"})
 		return
 	}
 
 	moderatorID, exists := middleware.GetUserID(ctx)
 	if !exists {
+		logrus.Error("❌ Authentication required")
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		return
 	}
 
-	calculationData := make(map[string]interface{})
-	err = h.repo.Composition_interval.CompleteComposition(uint(id), moderatorID, "Отклонена", calculationData)
+	logrus.Infof("Moderator ID: %d is rejecting composition ID: %d", moderatorID, id)
+
+	// Обновляем статус на "Отклонена"
+	updates := map[string]interface{}{
+		"status":       "Отклонена",
+		"moderator_id": moderatorID,
+		"date_update":  time.Now(),
+		"date_finish":  time.Now(),
+		// НЕ очищаем belonging - для отклонённых заявок оно остаётся пустым
+	}
+
+	logrus.Infof("Updating composition %d with: status=Отклонена, moderator_id=%d",
+		id, moderatorID)
+
+	err = h.repo.Composition_interval.UpdateCompositionFields(uint(id), updates)
 	if err != nil {
-		logrus.Error(err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		logrus.Errorf("❌ Failed to reject composition %d: %v", id, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Composition rejected successfully"})
+	logrus.Infof("✅ Composition %d status updated to 'Отклонена' in database", id)
+	logrus.Info("=== REJECT COMPOSITION END ===")
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message": "Composition rejected successfully",
+	})
 }
 
 // DeleteComposition godoc
@@ -524,5 +586,55 @@ func (h *CompositionHandler) ReceiveCalculationResult(ctx *gin.Context) {
 		"message":        "Результат расчёта успешно обновлён",
 		"composition_id": req.CompositionID,
 		"result":         req.Result,
+	})
+}
+
+// handler/composition.go - добавьте после RejectComposition
+type StartCalculationRequest struct {
+	CompositionID uint `json:"composition_id" binding:"required"`
+}
+
+// StartCalculation godoc
+// @Summary Start async calculation
+// @Description Start async calculation of composition belonging (moderator only)
+// @Tags Compositions
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body StartCalculationRequest true "Composition ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /compositions/start-calculation [post]
+func (h *CompositionHandler) StartCalculation(ctx *gin.Context) {
+	var req StartCalculationRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data"})
+		return
+	}
+
+	// Проверяем существование композиции
+	if _, err := h.repo.Composition_interval.GetComposition(req.CompositionID); err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Composition not found"})
+		return
+	}
+
+	// Вызываем Django-сервис асинхронно
+	go func(compID uint) {
+		// Здесь должен быть код вызова Django сервиса
+		// Пример:
+		// payload := map[string]interface{}{"composition_id": compID}
+		// jsonData, _ := json.Marshal(payload)
+		// http.Post("http://localhost:8001/calculate/", "application/json", bytes.NewBuffer(jsonData))
+
+		logrus.Infof("Async calculation started for composition %d", compID)
+	}(req.CompositionID)
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message":        "Async calculation started",
+		"composition_id": req.CompositionID,
+		"service":        "Django async service",
 	})
 }

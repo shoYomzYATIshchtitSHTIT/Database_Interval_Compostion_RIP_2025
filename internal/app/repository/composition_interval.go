@@ -107,22 +107,32 @@ func (r *CompositionIntervalRepository) GetComposition(id uint) (ds.Composition,
 
 // UpdateCompositionFields обновляет поля заявки по теме
 func (r *CompositionIntervalRepository) UpdateCompositionFields(id uint, updates map[string]interface{}) error {
+	// УДАЛЯЕМ ТОЛЬКО ТЕ ПОЛЯ, КОТОРЫЕ НЕЛЬЗЯ МЕНЯТЬ
 	delete(updates, "id")
-	delete(updates, "status")
-	delete(updates, "creator_id")
-	delete(updates, "moderator_id")
-	delete(updates, "date_create")
-	delete(updates, "date_finish")
+	delete(updates, "creator_id")  // Создателя менять нельзя
+	delete(updates, "date_create") // Дата создания неизменна
+
+	// НЕ удаляем эти поля - их можно менять:
+	// - status: можно менять (Черновик → Сформирована → Завершена/Отклонена)
+	// - moderator_id: назначается при завершении/отклонении
+	// - date_finish: устанавливается при завершении
+	// - belonging: обновляется Django-сервисом
 
 	updates["date_update"] = time.Now()
 
+	logrus.Infof("🔄 Updating composition %d with fields: %+v", id, updates)
+
 	result := r.db.Model(&ds.Composition{}).Where("id = ?", id).Updates(updates)
 	if result.Error != nil {
+		logrus.Errorf("❌ Database error updating composition %d: %v", id, result.Error)
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
+		logrus.Errorf("❌ No rows affected - composition %d not found", id)
 		return fmt.Errorf("composition with id %d not found", id)
 	}
+
+	logrus.Infof("✅ Successfully updated composition %d", id)
 	return nil
 }
 
