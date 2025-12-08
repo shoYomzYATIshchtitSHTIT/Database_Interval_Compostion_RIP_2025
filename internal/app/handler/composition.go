@@ -1,11 +1,15 @@
 package handler
 
 import (
-	"Backend-RIP/internal/app/middleware"
-	"Backend-RIP/internal/app/repository"
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
+
+	"Backend-RIP/internal/app/middleware"
+	"Backend-RIP/internal/app/repository"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -311,8 +315,8 @@ func (h *CompositionHandler) FormComposition(ctx *gin.Context) {
 }
 
 // CompleteComposition godoc
-// @Summary Complete composition
-// @Description Complete composition (moderator only)
+// @Summary Complete composition and start async calculation
+// @Description Complete composition and automatically start async calculation in Django service (moderator only)
 // @Tags Compositions
 // @Security BearerAuth
 // @Param id path int true "Composition ID"
@@ -335,6 +339,7 @@ func (h *CompositionHandler) CompleteComposition(ctx *gin.Context) {
 		return
 	}
 
+	// Завершаем заявку
 	calculationData := make(map[string]interface{})
 	err = h.repo.Composition_interval.CompleteComposition(uint(id), moderatorID, "Завершена", calculationData)
 	if err != nil {
@@ -343,7 +348,47 @@ func (h *CompositionHandler) CompleteComposition(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Composition completed successfully"})
+	// ЗАПУСКАЕМ АСИНХРОННЫЙ РАСЧЁТ В DJANGO-СЕРВИСЕ
+	go func(compositionID uint) {
+		logrus.Infof("Starting async calculation for composition %d via Django service", compositionID)
+
+		// Подготовка запроса к Django-сервису
+		payload := map[string]interface{}{
+			"composition_id": compositionID,
+		}
+
+		jsonData, err := json.Marshal(payload)
+		if err != nil {
+			logrus.Errorf("Failed to marshal request for composition %d: %v", compositionID, err)
+			return
+		}
+
+		// Вызов Django-сервиса
+		resp, err := http.Post(
+			"http://localhost:8001/calculate/", // URL Django-сервиса
+			"application/json",
+			bytes.NewBuffer(jsonData),
+		)
+
+		if err != nil {
+			logrus.Errorf("Failed to call Django service for composition %d: %v", compositionID, err)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			logrus.Errorf("Django service returned error for composition %d: HTTP %d", compositionID, resp.StatusCode)
+			// Читаем тело ответа для отладки
+			body, _ := io.ReadAll(resp.Body)
+			logrus.Errorf("Response body: %s", string(body))
+		} else {
+			logrus.Infof("Django service accepted calculation request for composition %d", compositionID)
+		}
+	}(uint(id))
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message": "Composition completed successfully. Async calculation started in Django service.",
+	})
 }
 
 // RejectComposition godoc
@@ -415,4 +460,69 @@ func (h *CompositionHandler) DeleteComposition(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Composition deleted successfully"})
+}
+
+type CalculationResultRequest struct {
+	CompositionID uint   `json:"composition_id" binding:"required"`
+	Result        string `json:"result" binding:"required"`
+	APIKey        string `json:"api_key" binding:"required"`
+}
+
+// ReceiveCalculationResult godoc
+// @Summary Получить результат расчёта от асинхронного сервиса
+// @Description Принимает результат расчёта от Django-сервиса
+// @Tags Compositions
+// @Accept json
+// @Produce json
+// @Param request body CalculationResultRequest true "Результат расчёта"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /compositions/receive-result [post]
+func (h *CompositionHandler) ReceiveCalculationResult(ctx *gin.Context) {
+	var req CalculationResultRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Неверные данные запроса: " + err.Error()})
+		return
+	}
+
+	// Проверка API ключа (псевдоавторизация)
+	const expectedAPIKey = "SECRET123" // Константа на 8 байт
+	if req.APIKey != expectedAPIKey {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Неверный API ключ"})
+		return
+	}
+
+	// Валидация результата
+	if req.Result != "принадлежит" && req.Result != "не принадлежит" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Неверное значение результата"})
+		return
+	}
+
+	// Проверяем существование композиции (без сохранения в переменную)
+	if _, err := h.repo.Composition_interval.GetComposition(req.CompositionID); err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Композиция не найдена"})
+		return
+	}
+
+	// Обновляем поле belonging
+	updates := map[string]interface{}{
+		"belonging":   req.Result,
+		"date_update": time.Now(),
+	}
+
+	err := h.repo.Composition_interval.UpdateCompositionFields(req.CompositionID, updates)
+	if err != nil {
+		logrus.Errorf("Failed to update calculation result for composition %d: %v", req.CompositionID, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Ошибка при обновлении результата"})
+		return
+	}
+
+	logrus.Infof("Calculation result received and saved: composition %d -> %s", req.CompositionID, req.Result)
+	ctx.JSON(http.StatusOK, gin.H{
+		"message":        "Результат расчёта успешно обновлён",
+		"composition_id": req.CompositionID,
+		"result":         req.Result,
+	})
 }

@@ -26,6 +26,8 @@ func RegisterHandlers(router *gin.Engine, repo *repository.Repository) {
 		// Просмотр интервалов (доступно всем)
 		public.GET("/intervals", intervalHandler.GetIntervals)
 		public.GET("/intervals/:id", intervalHandler.GetInterval)
+
+		public.POST("/compositions/receive-result", compositionHandler.ReceiveCalculationResult)
 	}
 
 	// Protected routes - требуют аутентификации
@@ -59,5 +61,6 @@ func RegisterHandlers(router *gin.Engine, repo *repository.Repository) {
 
 		moderator.PUT("/compositions/:id/complete", compositionHandler.CompleteComposition)
 		moderator.PUT("/compositions/:id/reject", compositionHandler.RejectComposition)
+
 	}
 }

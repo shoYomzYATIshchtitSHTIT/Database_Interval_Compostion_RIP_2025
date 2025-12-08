@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -160,38 +161,30 @@ func (r *CompositionIntervalRepository) FormComposition(id uint, creatorID uint)
 }
 
 // CompleteComposition завершает/отклоняет заявку модератором
+// repository/composition_interval.go - метод CompleteComposition
 func (r *CompositionIntervalRepository) CompleteComposition(id uint, moderatorID uint, status string, calculationData map[string]interface{}) error {
 	if status != "Завершена" && status != "Отклонена" {
 		return fmt.Errorf("invalid status transition")
 	}
 
 	var composition ds.Composition
-	err := r.db.Where("id = ? AND status = ?", id, "Сформирована").First(&composition).Error
+	err := r.db.Where("id = ? AND status = ?", id, "Сформирована").First(&composition)
 	if err != nil {
 		return fmt.Errorf("composition not found or not in formed status")
 	}
 
-	// Вычисляем принадлежность к классицизму по формуле
-	S, _ := r.calculateClassicismCoefficient(id) // убрал mu, так как он не используется
-	belongsToClassicism := S >= 0.5
-
-	// Формируем belonging в формате "принадлежит/не принадлежит"
-	var belongingResult string
-	if belongsToClassicism {
-		belongingResult = "принадлежит"
-	} else {
-		belongingResult = "не принадлежит"
-	}
+	// ИЗМЕНЕНИЕ: НЕ вычисляем принадлежность здесь - она будет вычислена в Django
+	// belonging будет пустым, Django заполнит его позже
 
 	updates := map[string]interface{}{
 		"status":       status,
 		"moderator_id": moderatorID,
 		"date_update":  time.Now(),
 		"date_finish":  time.Now(),
-		"belonging":    belongingResult,
+		"belonging":    "", // Оставляем пустым, Django заполнит
 	}
 
-	// Добавляем расчетные данные если есть
+	// Добавляем расчётные данные если есть
 	for key, value := range calculationData {
 		updates[key] = value
 	}
@@ -203,6 +196,8 @@ func (r *CompositionIntervalRepository) CompleteComposition(id uint, moderatorID
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("composition with id %d not found", id)
 	}
+
+	logrus.Infof("Composition %d completed, belonging will be calculated by Django service", id)
 	return nil
 }
 
