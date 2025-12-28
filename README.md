@@ -7,6 +7,6 @@
 ### Ссылки
 
 - **GitHubPages**: https://shoyomzyatishchtitshtit.github.io/Frontend-RIP/
-- **Бэкенд (основной веб-сервис)**: https://github.com/Liza05444/De_Broglie_Calculation_RIP_2025
-- **Бэкенд (асинхронный сервис)**: https://github.com/Liza05444/De_Broglie_Calculation_RIP_2025_async_web_service
-- **Фронтенд**: https://github.com/Liza05444/De_Broglie_Calculation_RIP_2025_frontend
+- **Бэкенд (основной веб-сервис)**: https://github.com/shoYomzYATIshchtitSHTIT/Database_Interval_Compostion_RIP_2025
+- **Бэкенд (асинхронный сервис)**: https://github.com/shoYomzYATIshchtitSHTIT/Database_Interval_Compostion_RIP_2025_Async
+- **Фронтенд**: https://github.com/shoYomzYATIshchtitSHTIT/Database_Interval_Compostion_RIP_2025_Frontend
