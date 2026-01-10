@@ -1,3 +1,4 @@
+// internal/app/handler/interval.go
 package handler
 
 import (
@@ -39,22 +40,30 @@ type AddIntervalToCompositionRequest struct {
 }
 
 // GetIntervals godoc
-// @Summary Get intervals list
-// @Description Get list of intervals with filtering
+// @Summary Get intervals list with pagination
+// @Description Get paginated list of intervals with filtering. Always returns paginated response.
 // @Tags Intervals
 // @Produce json
 // @Param title query string false "Filter by title"
 // @Param tone_min query number false "Filter by minimum tone"
 // @Param tone_max query number false "Filter by maximum tone"
-// @Success 200 {array} ds.Interval
+// @Param page query int false "Page number (default: 1)" minimum(1) default(1)
+// @Param page_size query int false "Page size (default: 8, maximum: 8)" minimum(1) maximum(8) default(8)
+// @Success 200 {object} ds.PaginatedIntervalsResponse
 // @Failure 400 {object} map[string]string
 // @Failure 500 {object} map[string]string
 // @Router /intervals [get]
 func (h *IntervalHandler) GetIntervals(ctx *gin.Context) {
+	// Получаем параметры фильтрации
 	title := ctx.Query("title")
 	toneMinStr := ctx.Query("tone_min")
 	toneMaxStr := ctx.Query("tone_max")
 
+	// Получаем параметры пагинации
+	pageStr := ctx.DefaultQuery("page", "1")
+	pageSizeStr := ctx.DefaultQuery("page_size", "8") // Всегда пагинация
+
+	// Конвертируем параметры фильтрации
 	var toneMin, toneMax float64
 	var err error
 
@@ -74,14 +83,39 @@ func (h *IntervalHandler) GetIntervals(ctx *gin.Context) {
 		}
 	}
 
-	intervals, err := h.repo.Interval.GetIntervals(title, toneMin, toneMax)
+	// Конвертируем параметры пагинации
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	pageSize, err := strconv.Atoi(pageSizeStr)
+	if err != nil || pageSize < 1 {
+		pageSize = 8
+	}
+
+	// Ограничиваем page_size максимум 8
+	if pageSize > 8 {
+		pageSize = 8
+	}
+
+	// Обычный запрос с пагинацией
+	intervals, pagination, err := h.repo.Interval.GetIntervals(
+		title, toneMin, toneMax, page, pageSize,
+	)
+
 	if err != nil {
 		logrus.Error("Failed to get intervals: ", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get intervals"})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, intervals)
+	response := ds.PaginatedIntervalsResponse{
+		Data:       intervals,
+		Pagination: pagination,
+	}
+
+	ctx.JSON(http.StatusOK, response)
 }
 
 // GetInterval godoc
@@ -303,4 +337,33 @@ func (h *IntervalHandler) UpdateIntervalPhoto(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Interval image updated successfully"})
+}
+
+// ==================== ВСПОМОГАТЕЛЬНЫЕ СТРУКТУРЫ И ФУНКЦИИ ====================
+
+type ComparisonResponse struct {
+	WithIndex    ds.PaginatedIntervalsResponse `json:"with_index"`
+	WithoutIndex ds.PaginatedIntervalsResponse `json:"without_index"`
+	Comparison   ComparisonInfo                `json:"comparison"`
+	QueryPlan    string                        `json:"query_plan,omitempty"`
+}
+
+type ComparisonInfo struct {
+	TimeDifferenceMs int64   `json:"time_difference_ms"`
+	PerformanceGain  float64 `json:"performance_gain"`
+	Recommendation   string  `json:"recommendation"`
+}
+
+func getIndexRecommendation(timeDiff int64) string {
+	if timeDiff > 1000 {
+		return "Индексы ускорили запрос более чем на 1 секунду. Рекомендуется использовать индексы для больших таблиц."
+	} else if timeDiff > 100 {
+		return "Индексы дали значительное ускорение (~" + strconv.FormatInt(timeDiff, 10) + "мс)."
+	} else if timeDiff > 0 {
+		return "Небольшое ускорение с индексами."
+	} else if timeDiff == 0 {
+		return "Разницы во времени нет. Возможно, таблица небольшая или запрос простой."
+	} else {
+		return "Индексы замедлили запрос. Возможно, для этого конкретного запроса индексы неэффективны."
+	}
 }
